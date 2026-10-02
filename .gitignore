@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+serviceAccountKey.json
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+test_login.sh
+verify_email.sh
+test_data.txt
