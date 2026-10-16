@@ -59,7 +59,7 @@ def test_delete_uses_callers_uid(as_patient: TestClient, repo: _StubRepo) -> Non
     response = as_patient.delete(TRIAGE)
 
     assert response.status_code == 200
-    assert response.json() == {"deleted": 1}
+    assert response.json() == {"status": 200, "msg": "Success", "data": {"deleted": 1}}
     assert repo.deleted_for == ["patient-uid"]
 
 

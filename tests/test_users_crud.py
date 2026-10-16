@@ -6,14 +6,8 @@ from fastapi import HTTPException
 from firebase_admin import auth as firebase_auth
 from pydantic import ValidationError
 
-from app.schemas.models import (
-    Clinic,
-    DoctorCreate,
-    DoctorProfile,
-    PatientCreate,
-    TimeRange,
-    UserUpdate,
-)
+from app.schemas.doctors import Clinic, DoctorCreate, DoctorProfile, TimeRange
+from app.schemas.users import PatientCreate, UserUpdate
 from app.services.users import UserService
 
 

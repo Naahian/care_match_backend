@@ -22,8 +22,10 @@ class Settings(BaseSettings):
     debug: bool = True
 
     firebase_credentials_path: Optional[str] = None
+    firebase_api_key: Optional[str] = None
     firebase_storage_bucket: Optional[str] = None
     google_cloud_project: Optional[str] = None
+
     
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-3.1-flash"

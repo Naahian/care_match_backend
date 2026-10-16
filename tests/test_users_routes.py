@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,6 +88,15 @@ def stub_repo(monkeypatch) -> _StubRepo:
 
 
 USERS = "/api/v1/users"
+
+
+@pytest.fixture(autouse=True)
+def signup_emails(monkeypatch):
+    from app.services.account_emails import AccountEmailService
+
+    send = AsyncMock()
+    monkeypatch.setattr(AccountEmailService, "send_signup_verification", send)
+    return send
 
 
 # --- patient creation (public) -------------------------------------------
@@ -276,13 +285,13 @@ def test_get_me_returns_own_account(as_patient: TestClient) -> None:
         response = as_patient.get(f"{USERS}/me")
 
     assert response.status_code == 200
-    assert response.json()["uid"] == "caller-uid"
+    assert response.json()["data"]["uid"] == "caller-uid"
     assert get.call_args.args[0] == "caller-uid"
 
 
 def test_get_me_response_has_no_credentials(as_patient: TestClient) -> None:
     with patch.object(firebase_auth, "get_user", return_value=_record()):
-        body = as_patient.get(f"{USERS}/me").json()
+        body = as_patient.get(f"{USERS}/me").json()["data"]
 
     assert "SECRET_HASH" not in str(body)
     assert "password_hash" not in body
@@ -350,7 +359,7 @@ def test_patch_me_never_echoes_password(as_patient: TestClient) -> None:
         response = as_patient.patch(f"{USERS}/me", json={"phone_number": "+15550100"})
 
     assert response.status_code == 200
-    assert "password" not in response.json()
+    assert "password" not in response.json()["data"]
 
 
 def test_delete_me_deletes_own_account(as_patient: TestClient) -> None:

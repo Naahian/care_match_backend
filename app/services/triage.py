@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 
 from app.llm.client import LLMClient, get_llm_client
 from app.repositories.triage import TriageRepository
-from app.schemas.models import TriageRequest, TriageResponse, Urgency
+from app.schemas.triage import TriageRequest, TriageResponse, Urgency
 
 
 class TriageService:

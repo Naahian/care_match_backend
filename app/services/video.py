@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends
 
 from app.repositories.appointment import AppointmentRepository
-from app.schemas.models import VideoTokenResponse
+from app.schemas.video import VideoTokenResponse
 
 TOKEN_TTL_MINUTES = 60
 

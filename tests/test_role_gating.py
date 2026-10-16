@@ -96,7 +96,7 @@ def test_list_doctors_omits_contact_details(client: TestClient, authed, stub_rep
         }
     ]
 
-    body = client.get("/api/v1/users/doctors").json()
+    body = client.get("/api/v1/users/doctors").json()["data"]
 
     assert len(body) == 1
     assert body[0]["uid"] == "doc-uid"
@@ -151,8 +151,12 @@ def _authed_record(role: str):
     )
 
 
-def test_registration_endpoints_are_public(client: TestClient) -> None:
+def test_registration_endpoints_are_public(client: TestClient, monkeypatch) -> None:
     """Both registration paths are open; the role comes from the URL."""
+    from unittest.mock import AsyncMock
+    from app.services.account_emails import AccountEmailService
+
+    monkeypatch.setattr(AccountEmailService, "send_signup_verification", AsyncMock())
     with patch.object(firebase_auth, "create_user", return_value=_record()), patch.object(
         firebase_auth, "update_user", return_value=_record()
     ):

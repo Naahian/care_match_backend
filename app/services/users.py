@@ -7,15 +7,9 @@ from firebase_admin import exceptions as firebase_exceptions
 from fastapi import Depends, HTTPException, status
 
 from app.repositories.doctor import DoctorRepository
-from app.schemas.models import (
-    DoctorCreate,
-    DoctorProfile,
-    DoctorSummary,
-    PatientCreate,
-    Role,
-    UserResponse,
-    UserUpdate,
-)
+from app.schemas.common import Role
+from app.schemas.doctors import DoctorCreate, DoctorProfile, DoctorSummary
+from app.schemas.users import PatientCreate, UserResponse, UserUpdate
 
 PROFILE_FIELDS = ("display_name", "phone_number", "photo_url")
 

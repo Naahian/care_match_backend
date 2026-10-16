@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import Depends
 
 from app.repositories.appointment import AppointmentRepository
-from app.schemas.models import (
+from app.schemas.appointments import (
     AppointmentCreate,
     AppointmentResponse,
     AppointmentStatus,

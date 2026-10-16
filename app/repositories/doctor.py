@@ -1,7 +1,7 @@
 from typing import Any, Optional
 
 from app.repositories.base import BaseRepository
-from app.schemas.models import DoctorProfile
+from app.schemas.doctors import DoctorProfile
 
 
 class DoctorRepository(BaseRepository):

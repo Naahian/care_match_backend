@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import Depends
 
 from app.repositories.payment import PaymentRepository
-from app.schemas.models import PaymentCreate, PaymentResponse
+from app.schemas.payments import PaymentCreate, PaymentResponse
 
 
 class PaymentService:

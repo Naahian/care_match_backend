@@ -4,7 +4,8 @@ import firebase_admin
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.security import AuthenticatedUser, require_admin
-from app.schemas.models import AdminUserPage, AdminUserUpdate
+from app.schemas.admin import AdminUserPage, AdminUserUpdate
+from app.schemas.responses import HealthResponse, SuccessResponse
 from app.services.users import project_user
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -12,16 +13,16 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 MAX_LIST_USERS_RESULTS = 1000
 
 
-@router.get("/health")
-async def admin_health() -> dict[str, str]:
-    return {"status": "ok"}
+@router.get("/health", response_model=SuccessResponse[HealthResponse], response_model_exclude_none=True)
+async def admin_health() -> SuccessResponse[HealthResponse]:
+    return SuccessResponse(data=HealthResponse())
 
 
-@router.get("/users", response_model=AdminUserPage)
+@router.get("/users", response_model=SuccessResponse[AdminUserPage])
 async def get_users(
     limit: int = Query(default=50, ge=1, le=MAX_LIST_USERS_RESULTS),
     page_token: Optional[str] = Query(default=None),
-) -> AdminUserPage:
+) -> SuccessResponse[AdminUserPage]:
     """List Firebase Auth users, one page at a time.
 
     Pass the returned ``next_page_token`` back as ``page_token`` to page forward.
@@ -40,10 +41,10 @@ async def get_users(
             detail="Failed to reach Firebase Auth",
         ) from exc
 
-    return AdminUserPage(
+    return SuccessResponse(data=AdminUserPage(
         users=[project_user(record) for record in page.users],
         next_page_token=page.next_page_token or None,
-    )
+    ))
 
 
 @router.post("/users/{uid}/role", status_code=status.HTTP_204_NO_CONTENT)
