@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
 
     payment_provider_secret: Optional[str] = None
+    sslcommerz_store_id: Optional[str] = None
+    sslcommerz_store_password: Optional[str] = None
+    sslcommerz_sandbox: bool = True
+    sslcommerz_callback_base_url: str = "http://localhost:8000"
+    sslcommerz_timeout_seconds: float = Field(default=30.0, gt=0)
     cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:3000"])
 
     @field_validator("cors_origins", mode="before")
