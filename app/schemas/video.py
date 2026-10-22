@@ -1,14 +1,10 @@
-from datetime import datetime
-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VideoTokenRequest(BaseModel):
-    appointment_id: str
+    appointment_id: str = Field(min_length=1, max_length=64)
 
 
 class VideoTokenResponse(BaseModel):
-    appointment_id: str
-    room_id: str
-    access_token: str
-    expires_at: datetime
+    token: str
+    channelName: str

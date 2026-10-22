@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     firebase_storage_bucket: Optional[str] = None
     google_cloud_project: Optional[str] = None
 
+    agora_app_id: Optional[str] = None
+    agora_app_certificate: Optional[str] = None
+
     
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-3.1-flash"

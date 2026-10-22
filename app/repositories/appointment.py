@@ -25,5 +25,10 @@ class AppointmentRepository(BaseRepository):
         record = self.get(appointment_id)
         if not record:
             return None
-        key = "doctor_id" if role == "doctor" else "patient_id"
-        return record if record.get(key) == user_id else None
+        if role == "admin":
+            return record
+        if role not in {"doctor", "patient"}:
+            return None
+        # Account roles do not determine which side of an appointment a user
+        # occupies (a doctor can also book an appointment as a patient).
+        return record if user_id in (record.get("doctor_id"), record.get("patient_id")) else None

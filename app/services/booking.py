@@ -54,7 +54,7 @@ class BookingService:
         actor_role: str = "doctor",
     ) -> dict[str, Any]:
         record = self._repo.get_for_user(appointment_id, actor_uid, actor_role)
-        if not record:
+        if not record or (actor_role == "doctor" and record.get("doctor_id") != actor_uid):
             raise PermissionError("Appointment not found for this user")
 
         self._repo.update(
