@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from typing import Optional
 
@@ -10,6 +11,8 @@ from app.repositories.chat import ChatNotFound, ChatRepository, InvalidChatCurso
 from app.schemas.chat import (
     ChatCreate, ChatPage, ChatResponse, MessageCreate, MessagePage, MessageResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -29,6 +32,7 @@ class ChatService:
         except InvalidChatCursor as exc:
             raise HTTPException(400, str(exc)) from exc
         except GoogleAPIError as exc:
+            logger.exception("Chat storage request failed")
             raise HTTPException(503, "Chat storage is unavailable") from exc
 
     def create_chat(self, payload: ChatCreate, uid: str) -> ChatResponse:

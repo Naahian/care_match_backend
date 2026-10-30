@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from firebase_admin import auth as firebase_auth
-from google.api_core.exceptions import ServiceUnavailable
+from google.api_core.exceptions import FailedPrecondition, ServiceUnavailable
 
 from app.core.security import AuthenticatedUser, get_current_user
 from app.main import create_app
@@ -203,13 +203,20 @@ def test_chat_pagination_and_cursor_validation(chat_api):
     assert client.get("/api/v1/chats/not-a-chat-id").status_code == 422
 
 
-def test_storage_error_is_service_unavailable(chat_api, monkeypatch):
+@pytest.mark.parametrize("error", [
+    ServiceUnavailable("backend credentials and internal details"),
+    FailedPrecondition("The query requires an index: internal index creation URL"),
+])
+def test_storage_error_is_service_unavailable(chat_api, monkeypatch, caplog, error):
     client, repo, _, _ = chat_api
 
     def unavailable(*args):
-        raise ServiceUnavailable("backend credentials and internal details")
+        raise error
 
     monkeypatch.setattr(repo, "list_for_user", unavailable)
     response = client.get("/api/v1/chats")
     assert response.status_code == 503
     assert "credentials" not in response.text
+    assert "internal" not in response.text
+    assert "Chat storage request failed" in caplog.text
+    assert str(error) in caplog.text
