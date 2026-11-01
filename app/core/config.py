@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = True
     appointment_timezone: str = "Asia/Dhaka"
+    doctor_appointment_earning_tk: int = Field(default=100, ge=0)
 
     @field_validator("appointment_timezone")
     @classmethod

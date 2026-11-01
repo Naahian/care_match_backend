@@ -86,6 +86,7 @@ def test_projection_excludes_credential_material() -> None:
         "date_of_birth",
         "gender",
         "blood_group",
+        "total_earnings",
     }
 
 

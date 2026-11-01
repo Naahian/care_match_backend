@@ -55,6 +55,7 @@ class UserResponse(UserPersonalDetails):
     providers: list[str] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
+    total_earnings: Optional[int] = Field(default=None, ge=0, description="Doctor earnings in Bangladeshi taka (BDT)")
 
 
 class UserCreateResponse(SuccessResponse[UserResponse]):

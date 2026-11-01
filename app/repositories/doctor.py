@@ -9,6 +9,10 @@ class DoctorRepository(BaseRepository):
 
     collection_name = "doctors"
 
+    def get_total_earnings(self, uid: str) -> int:
+        snapshot = self._db.collection("doctor_earnings").document(uid).get()
+        return (snapshot.to_dict() or {}).get("total_earnings", 0) if snapshot.exists else 0
+
     def create_for_user(
         self,
         uid: str,

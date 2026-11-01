@@ -1,17 +1,19 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser, require_roles
 from app.api.profile_updates import PROFILE_REQUEST_BODY, ProfileUpdateRequest, parse_profile_update
 from fastapi.concurrency import run_in_threadpool
 from app.schemas.account_emails import AccountEmailResponse, PasswordResetRequest
 from app.schemas.doctors import DoctorCreate, DoctorSummary
+from app.schemas.medical_reports import MedicalReportPage
 from app.schemas.users import PatientCreate, UserCreateResponse, UserResponse, UserUpdate
 from app.schemas.responses import SuccessResponse
 from app.services.account_emails import AccountEmailService
 from app.services.users import UserService
+from app.services.medical_reports import MedicalReportService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -124,6 +126,19 @@ async def get_my_user(
 ) -> SuccessResponse[UserResponse]:
     """Return the caller's own account."""
     return SuccessResponse(data=service.get_self(user.uid))
+
+
+@router.get("/me/medical-reports", response_model=SuccessResponse[MedicalReportPage])
+def get_my_medical_reports(
+    user: require_roles("patient"),
+    response: Response,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: MedicalReportService = Depends(MedicalReportService),
+) -> SuccessResponse[MedicalReportPage]:
+    """List the patient's own reports with temporary private download links."""
+    response.headers["Cache-Control"] = "no-store"
+    return SuccessResponse(data=service.list_for_patient(user.uid, limit, offset))
 
 
 @router.patch("/me", response_model=SuccessResponse[UserResponse],

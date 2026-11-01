@@ -3,14 +3,36 @@ from typing import Optional
 import firebase_admin
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.api.medical_report_uploads import (
+    MEDICAL_REPORT_REQUEST_BODY, MedicalReportUpload, parse_medical_report_upload,
+)
 from app.core.security import AuthenticatedUser, require_admin
 from app.schemas.admin import AdminUserPage, AdminUserUpdate
+from app.schemas.medical_reports import MedicalReportResponse
 from app.schemas.responses import HealthResponse, SuccessResponse
+from app.services.medical_reports import MedicalReportService
 from app.services.users import project_user
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 MAX_LIST_USERS_RESULTS = 1000
+
+
+@router.post(
+    "/patients/{patient_uid}/medical-reports", status_code=status.HTTP_201_CREATED,
+    response_model=SuccessResponse[MedicalReportResponse],
+    summary="Upload a medical report for a patient",
+    openapi_extra=MEDICAL_REPORT_REQUEST_BODY,
+)
+def create_medical_report(
+    patient_uid: str,
+    upload: MedicalReportUpload = Depends(parse_medical_report_upload),
+    service: MedicalReportService = Depends(MedicalReportService),
+) -> SuccessResponse[MedicalReportResponse]:
+    return SuccessResponse(
+        data=service.create(patient_uid, upload.filename, upload.data),
+        status=201, msg="Created",
+    )
 
 
 @router.get("/health", response_model=SuccessResponse[HealthResponse], response_model_exclude_none=True)
@@ -54,10 +76,11 @@ async def set_user_role(
     admin: AuthenticatedUser = Depends(require_admin),
 ) -> None:
     try:
+        record = firebase_admin.auth.get_user(uid)
         firebase_admin.auth.update_user(
             uid,
             disabled=payload.disabled,
-            custom_claims={"role": payload.role},
+            custom_claims={**(record.custom_claims or {}), "role": payload.role},
         )
     except firebase_admin.auth.UserNotFoundError as exc:
         raise HTTPException(

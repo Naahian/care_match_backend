@@ -12,6 +12,28 @@ Only the treating doctor or an admin can update an appointment's status through
 `cancelled`). Completion supports all three consultation types. Patients cannot
 change status. Completed and cancelled appointments cannot be reopened.
 
+Each new transition to `completed` credits the treating doctor with 100 Tk by
+default, for every consultation type. Set `DOCTOR_APPOINTMENT_EARNING_TK` to a
+nonnegative integer and restart the backend to change the amount for future
+completions. Cancelled/expired appointments do not earn a credit. Repeating a
+completion is safe and does not credit again, including after changing the rate.
+
+The appointment's `earnings_amount_tk` and the increment to
+`doctor_earnings/{doctor_uid}.total_earnings` commit in one Firestore transaction.
+This private collection is authoritative and is blocked by the existing client
+rules. Completion then mirrors `total_earnings` into the doctor's Firebase Auth
+custom claims while preserving other claims. An Auth failure does not roll back
+completion or lose its credit; another completion retry or `GET /api/v1/users/me`
+repairs the mirror. Concurrent Auth mirrors may be temporarily stale; the self
+endpoint reads the authoritative total. Existing ID tokens can retain old claim
+values until refreshed, so clients should use the self endpoint for earnings.
+
+For a doctor, `GET /api/v1/users/me` returns `data.total_earnings` as an integer in
+Bangladeshi taka (BDT), starting at 0. Other account roles return null. This field
+is response-only; profile updates cannot change it. This is an accrued earnings
+total, not a payment transfer or payout balance. Previously completed appointments
+are not backfilled automatically.
+
 Requested and confirmed appointments are automatically cancelled when their
 calendar date has passed in `APPOINTMENT_TIMEZONE` (default `Asia/Dhaka`). A
 consultation scheduled earlier today remains active until the next local day.

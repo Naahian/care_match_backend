@@ -64,6 +64,7 @@ def project_user(record: Any) -> UserResponse:
         providers=sorted({p.provider_id for p in record.provider_data if p.provider_id}),
         created_at=coerce_timestamp(getattr(metadata, "creation_timestamp", None)),
         last_login_at=coerce_timestamp(getattr(metadata, "last_sign_in_timestamp", None)),
+        total_earnings=claims.get("total_earnings", 0) if claims.get("role") == "doctor" else None,
     )
 
 
@@ -213,7 +214,33 @@ class UserService:
             raise _translate(exc) from exc
         if not include_profile:
             return project_user(record)
-        return self._profile_response(record, self._profile_data(uid))
+        response = self._profile_response(record, self._profile_data(uid))
+        if (record.custom_claims or {}).get("role") == "doctor":
+            response.total_earnings = self._doctor_earnings(record)
+        return response
+
+    def _doctor_earnings(self, record: Any) -> int:
+        try:
+            total = self._doctors.get_total_earnings(record.uid)
+        except (GoogleAPICallError, firebase_exceptions.FirebaseError) as exc:
+            raise HTTPException(503, "Could not load doctor earnings") from exc
+        claims = record.custom_claims or {}
+        if claims.get("total_earnings") != total:
+            try:
+                firebase_auth.set_custom_user_claims(record.uid, {**claims, "total_earnings": total})
+            except (firebase_exceptions.FirebaseError, ValueError):
+                # Firestore is authoritative; a later read repairs the mirror.
+                logger.warning("Could not mirror doctor earnings to Firebase Auth")
+        return total
+
+    def sync_doctor_earnings(self, uid: str) -> None:
+        try:
+            record = firebase_auth.get_user(uid)
+            if (record.custom_claims or {}).get("role") == "doctor":
+                self._doctor_earnings(record)
+        except (firebase_exceptions.FirebaseError, HTTPException, ValueError):
+            # Completion and its credit are already committed together.
+            logger.warning("Could not refresh doctor earnings in Firebase Auth")
 
     def _profile_data(self, uid: str) -> dict[str, Any]:
         try:

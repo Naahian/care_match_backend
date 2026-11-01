@@ -23,8 +23,26 @@ def store(monkeypatch):
     # Exercise repository transaction logic without a live Firestore server.
     monkeypatch.setattr("app.repositories.appointment.firestore.transactional", lambda fn: fn)
     rows = {}
+    earnings_rows = {}
     db = Mock()
-    collection = db.collection.return_value
+    collection = Mock()
+    earnings_collection = Mock()
+    db.collection.side_effect = lambda name: earnings_collection if name == "doctor_earnings" else collection
+    db.earnings_rows = earnings_rows
+
+    def earnings_document(uid):
+        ref = Mock(id=uid)
+        ref.get.side_effect = lambda: Mock(exists=uid in earnings_rows,
+                                          to_dict=lambda: dict(earnings_rows.get(uid, {})))
+        return ref
+
+    earnings_collection.document.side_effect = earnings_document
+
+    def set_earnings(ref, data, merge=False):
+        previous = earnings_rows.get(ref.id, {}).get("total_earnings", 0)
+        earnings_rows[ref.id] = {**data, "total_earnings": previous + data["total_earnings"].value}
+
+    db.transaction.return_value.set.side_effect = set_earnings
 
     def document(uid=None):
         uid = uid or "new-appointment"

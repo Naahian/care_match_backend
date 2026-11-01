@@ -321,6 +321,7 @@ def test_service_exposes_no_generic_create() -> None:
         "get_self",
         "update_self",
         "delete_self",
+        "sync_doctor_earnings",
     }
 
 

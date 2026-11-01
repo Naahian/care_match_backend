@@ -5,6 +5,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from app.core.appointment_rules import ACTIVE_STATUSES, is_expired
+from app.core.config import settings
 
 from app.repositories.base import BaseRepository
 
@@ -59,6 +60,16 @@ class AppointmentRepository(BaseRepository):
                 "updated_at": datetime.now(timezone.utc),
                 "updated_by": "system" if expired else actor_uid,
             }
+            if target == "completed":
+                amount = settings.doctor_appointment_earning_tk
+                changes["earnings_amount_tk"] = amount
+                # The status gate above and this atomic increment prevent
+                # retries and concurrent completions from crediting twice.
+                earnings = self._db.collection("doctor_earnings").document(record["doctor_id"])
+                transaction.set(earnings, {
+                    "total_earnings": firestore.Increment(amount),
+                    "updated_at": changes["updated_at"],
+                }, merge=True)
             transaction.update(ref, changes)
             return {**record, **changes}
 

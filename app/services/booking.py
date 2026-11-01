@@ -75,6 +75,8 @@ class BookingService:
         updated = self._repo.transition(appointment_id, new_status.value, actor_uid, actor_role)
         if not updated:
             raise PermissionError("Appointment not found for this user")
+        if updated.get("status") == "completed":
+            self._users.sync_doctor_earnings(updated["doctor_id"])
         return self._response_record(updated)
 
     def list_for(self, user_id: str, role: str) -> list[dict[str, Any]]:
