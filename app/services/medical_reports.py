@@ -80,6 +80,8 @@ def prepare_medical_report(filename: str, data: bytes) -> tuple[str, bytes, str]
 
 
 class MedicalReportService:
+    bucket = MEDICAL_REPORTS_BUCKET
+
     def __init__(self, media: SupabaseMediaStorage = Depends(SupabaseMediaStorage)) -> None:
         self._media = media
 
@@ -108,7 +110,7 @@ class MedicalReportService:
 
     def list_for_patient(self, patient_uid: str, limit: int, offset: int) -> MedicalReportPage:
         validate_patient_folder(patient_uid)
-        rows = self._media.list_medical_reports(patient_uid, limit + 1, offset)
+        rows = self._media.list_documents(self.bucket, patient_uid, limit + 1, offset)
         next_offset = offset + limit if len(rows) > limit else None
         records = []
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._media.report_url_lifetime)
@@ -126,11 +128,11 @@ class MedicalReportService:
                 if not isinstance(size, int) or isinstance(size, bool) or size < 0:
                     raise ValueError("Invalid report size")
                 records.append({
-                    "patient_uid": patient_uid, "filename": name, "bucket": MEDICAL_REPORTS_BUCKET,
+                    "patient_uid": patient_uid, "filename": name, "bucket": self.bucket,
                     "path": f"{patient_uid}/{name}", "content_type": REPORT_TYPES[extension],
                     "size_bytes": size, "created_at": row.get("created_at"),
                 })
-            urls = self._media.medical_report_urls([record["path"] for record in records])
+            urls = self._media.document_urls(self.bucket, [record["path"] for record in records])
             reports = [PatientMedicalReport(**record, download_url=urls[record["path"]],
                                            expires_at=expires_at) for record in records]
         except (ValueError, KeyError, TypeError) as exc:

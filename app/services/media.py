@@ -13,6 +13,7 @@ MAX_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_PHOTO_PIXELS = 25_000_000
 PROFILE_IMAGES_BUCKET = "profile_images"
 MEDICAL_REPORTS_BUCKET = "medical_reports"
+PRESCRIPTION_BUCKET = "prescription"
 logger = logging.getLogger(__name__)
 
 
@@ -84,9 +85,12 @@ class SupabaseMediaStorage:
         return path
 
     def upload_medical_report(self, path: str, data: bytes, content_type: str) -> None:
+        self.upload_document(MEDICAL_REPORTS_BUCKET, path, data, content_type)
+
+    def upload_document(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         try:
             self._request(
-                "POST", f"object/{MEDICAL_REPORTS_BUCKET}/{quote(path, safe='/')}",
+                "POST", f"object/{bucket}/{quote(path, safe='/')}",
                 content=data,
                 headers={"Content-Type": content_type, "x-upsert": "false",
                          "Cache-Control": "no-store"},
@@ -103,7 +107,7 @@ class SupabaseMediaStorage:
                     or error.get("message") == "Bucket not found"
                 ):
                     raise HTTPException(
-                        503, "Medical report storage is not configured: create the private medical_reports bucket",
+                        503, f"Storage is not configured: create the private {bucket} bucket",
                     ) from exc
                 # Supabase supports both the legacy 400 Duplicate response
                 # and newer conflict codes. Never expose provider bodies.
@@ -112,7 +116,7 @@ class SupabaseMediaStorage:
                     and (error.get("code") in ("KeyAlreadyExists", "ResourceAlreadyExists", "Duplicate")
                          or error.get("error") == "Duplicate")
                 ):
-                    raise HTTPException(409, "A report with this filename already exists for this patient") from exc
+                    raise HTTPException(409, "A file with this filename already exists for this patient") from exc
             # An uncertain upload may already be stored. Do not delete it.
             raise
 
@@ -131,7 +135,10 @@ class SupabaseMediaStorage:
             raise HTTPException(502, "Supabase returned an invalid photo link") from exc
 
     def list_medical_reports(self, uid: str, limit: int, offset: int) -> list[dict]:
-        response = self._request("POST", f"object/list/{MEDICAL_REPORTS_BUCKET}", json={
+        return self.list_documents(MEDICAL_REPORTS_BUCKET, uid, limit, offset)
+
+    def list_documents(self, bucket: str, uid: str, limit: int, offset: int) -> list[dict]:
+        response = self._request("POST", f"object/list/{bucket}", json={
             "prefix": f"{uid}/", "limit": limit, "offset": offset,
             "sortBy": {"column": "name", "order": "asc"},
         })
@@ -144,10 +151,13 @@ class SupabaseMediaStorage:
             raise HTTPException(502, "Supabase returned an invalid report listing") from exc
 
     def medical_report_urls(self, paths: list[str]) -> dict[str, str]:
+        return self.document_urls(MEDICAL_REPORTS_BUCKET, paths)
+
+    def document_urls(self, bucket: str, paths: list[str]) -> dict[str, str]:
         if not paths:
             return {}
         base, _ = self._configuration()
-        response = self._request("POST", f"object/sign/{MEDICAL_REPORTS_BUCKET}", json={
+        response = self._request("POST", f"object/sign/{bucket}", json={
             "paths": paths, "expiresIn": self._settings.supabase_signed_url_seconds,
         })
         try:
@@ -162,7 +172,7 @@ class SupabaseMediaStorage:
                     raise ValueError("Invalid link")
                 parsed = urlsplit(signed)
                 if (parsed.scheme or parsed.netloc or parsed.fragment or not parsed.query
-                    or unquote(parsed.path) != f"/object/sign/{MEDICAL_REPORTS_BUCKET}/{path}"):
+                    or unquote(parsed.path) != f"/object/sign/{bucket}/{path}"):
                     raise ValueError("Invalid link")
                 result[path] = f"{base}/storage/v1{signed}"
             return result

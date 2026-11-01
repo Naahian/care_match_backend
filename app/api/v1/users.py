@@ -9,11 +9,13 @@ from fastapi.concurrency import run_in_threadpool
 from app.schemas.account_emails import AccountEmailResponse, PasswordResetRequest
 from app.schemas.doctors import DoctorCreate, DoctorSummary
 from app.schemas.medical_reports import MedicalReportPage
+from app.schemas.prescriptions import PrescriptionPage
 from app.schemas.users import PatientCreate, UserCreateResponse, UserResponse, UserUpdate
 from app.schemas.responses import SuccessResponse
 from app.services.account_emails import AccountEmailService
 from app.services.users import UserService
 from app.services.medical_reports import MedicalReportService
+from app.services.prescriptions import PrescriptionService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -139,6 +141,19 @@ def get_my_medical_reports(
     """List the patient's own reports with temporary private download links."""
     response.headers["Cache-Control"] = "no-store"
     return SuccessResponse(data=service.list_for_patient(user.uid, limit, offset))
+
+
+@router.get("/me/prescriptions", response_model=SuccessResponse[PrescriptionPage])
+def get_my_prescriptions(
+    user: require_roles("patient"),
+    response: Response,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: PrescriptionService = Depends(PrescriptionService),
+) -> SuccessResponse[PrescriptionPage]:
+    """List the patient's own prescriptions with private download links."""
+    response.headers["Cache-Control"] = "no-store"
+    return SuccessResponse(data=service.list_prescriptions(user.uid, limit, offset))
 
 
 @router.patch("/me", response_model=SuccessResponse[UserResponse],
