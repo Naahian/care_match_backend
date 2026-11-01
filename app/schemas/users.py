@@ -1,12 +1,47 @@
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.responses import SuccessResponse
 
 
-class UserResponse(BaseModel):
+class UserPersonalDetails(BaseModel):
+    date_of_birth: Optional[date] = None
+    gender: Optional[Literal["Male", "Female", "Other"]] = None
+    blood_group: Optional[
+        Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    ] = None
+
+    @field_validator("date_of_birth", "gender", "blood_group", mode="before")
+    @classmethod
+    def normalize_personal_details(cls, value, info):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            if info.field_name == "gender":
+                return value.capitalize()
+            if info.field_name == "blood_group":
+                return value.upper()
+        if info.field_name == "date_of_birth" and value is not None:
+            if isinstance(value, datetime) or not isinstance(value, (str, date)):
+                raise ValueError("date_of_birth must be a date in YYYY-MM-DD format")
+            if isinstance(value, str) and (
+                len(value) != 10 or value[4] != "-" or value[7] != "-"
+            ):
+                raise ValueError("date_of_birth must be a date in YYYY-MM-DD format")
+        return value
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def validate_date_of_birth(cls, value: Optional[date]) -> Optional[date]:
+        if value is not None and value > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return value
+
+
+class UserResponse(UserPersonalDetails):
     """User-facing view of an account. Deliberately excludes credential material."""
 
     uid: str
@@ -40,7 +75,7 @@ class PatientCreate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=128)
 
 
-class UserUpdate(BaseModel):
+class UserUpdate(UserPersonalDetails):
     """Self-service update: profile fields only.
 
     Any subset may be supplied. A field omitted from the request is left
@@ -56,4 +91,4 @@ class UserUpdate(BaseModel):
 
     display_name: Optional[str] = Field(default=None, max_length=128)
     phone_number: Optional[str] = Field(default=None, max_length=20)
-    photo_url: Optional[str] = Field(default=None, max_length=2048)
+    remove_photo: bool = False

@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,12 +15,19 @@ from app.core.errors import (
 )
 from app.core.firebase import _initialize_app
 from app.schemas.responses import ErrorResponse, HealthResponse, SuccessResponse
+from app.services.appointment_expiry import run_appointment_expiry
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _initialize_app()
-    yield
+    expiry_task = asyncio.create_task(run_appointment_expiry())
+    try:
+        yield
+    finally:
+        expiry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await expiry_task
 
 
 def create_app() -> FastAPI:

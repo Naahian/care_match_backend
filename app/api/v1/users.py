@@ -4,6 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, require_roles
+from app.api.profile_updates import PROFILE_REQUEST_BODY, ProfileUpdateRequest, parse_profile_update
+from fastapi.concurrency import run_in_threadpool
 from app.schemas.account_emails import AccountEmailResponse, PasswordResetRequest
 from app.schemas.doctors import DoctorCreate, DoctorSummary
 from app.schemas.users import PatientCreate, UserCreateResponse, UserResponse, UserUpdate
@@ -124,17 +126,26 @@ async def get_my_user(
     return SuccessResponse(data=service.get_self(user.uid))
 
 
-@router.patch("/me", response_model=SuccessResponse[UserResponse])
+@router.patch("/me", response_model=SuccessResponse[UserResponse],
+              summary="Update profile and upload photo", openapi_extra=PROFILE_REQUEST_BODY)
 async def update_my_user(
-    payload: UserUpdate,
     user: CurrentUser,
+    update: ProfileUpdateRequest = Depends(parse_profile_update),
     service: UserService = Depends(UserService),
 ) -> SuccessResponse[UserResponse]:
-    """Update the caller's own profile: display_name, phone_number, photo_url.
+    """Update the caller's own account and personal profile details.
+
+    Upload a photo using multipart/form-data and the photo file field.
+    Editable fields: display_name, phone_number, date_of_birth
+    (YYYY-MM-DD), gender, and blood_group. Omitted fields stay unchanged;
+    null or an empty string clears a field. Set remove_photo=true to remove
+    the current picture. photo_url is response-only.
 
     ``email``, ``password`` and ``role`` are rejected by the schema (422).
     """
-    return SuccessResponse(data=service.update_self(user.uid, payload))
+    return SuccessResponse(data=await run_in_threadpool(
+        service.update_self, user.uid, update.payload, photo=update.photo
+    ))
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)

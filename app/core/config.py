@@ -20,11 +20,28 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     environment: str = "development"
     debug: bool = True
+    appointment_timezone: str = "Asia/Dhaka"
+
+    @field_validator("appointment_timezone")
+    @classmethod
+    def _appointment_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("appointment_timezone must be a valid IANA timezone") from exc
+        return value
 
     firebase_credentials_path: Optional[str] = None
     firebase_api_key: Optional[str] = None
     firebase_storage_bucket: Optional[str] = None
     google_cloud_project: Optional[str] = None
+
+    supabase_url: Optional[str] = None
+    supabase_secret_key: Optional[str] = Field(default=None, repr=False)
+    supabase_storage_public: bool = False
+    supabase_signed_url_seconds: int = Field(default=86400, ge=60, le=604800)
+    supabase_timeout_seconds: float = Field(default=30, gt=0)
 
     agora_app_id: Optional[str] = None
     agora_app_certificate: Optional[str] = None

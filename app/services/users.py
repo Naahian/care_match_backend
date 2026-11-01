@@ -1,17 +1,22 @@
 import logging
+from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from firebase_admin import auth as firebase_auth
 from firebase_admin import exceptions as firebase_exceptions
 from fastapi import Depends, HTTPException, status
+from google.api_core.exceptions import GoogleAPICallError
 
 from app.repositories.doctor import DoctorRepository
+from app.repositories.user_profile import UserProfileRepository
 from app.schemas.common import Role
 from app.schemas.doctors import DoctorCreate, DoctorProfile, DoctorSummary
-from app.schemas.users import PatientCreate, UserResponse, UserUpdate
+from app.schemas.users import PatientCreate, UserPersonalDetails, UserResponse, UserUpdate
+from app.services.media import SupabaseMediaStorage
 
-PROFILE_FIELDS = ("display_name", "phone_number", "photo_url")
+PROFILE_FIELDS = ("display_name", "phone_number")
+PERSONAL_FIELDS = {"date_of_birth", "gender", "blood_group"}
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +98,12 @@ class UserService:
     def __init__(
         self,
         doctor_repo: DoctorRepository = Depends(DoctorRepository),
+        profile_repo: UserProfileRepository = Depends(UserProfileRepository),
+        media: SupabaseMediaStorage = Depends(SupabaseMediaStorage),
     ) -> None:
         self._doctors = doctor_repo
+        self._profiles = profile_repo
+        self._media = media
 
     def create_patient(self, payload: PatientCreate) -> UserResponse:
         """Create a patient account. The role is fixed, never taken from input."""
@@ -197,21 +206,42 @@ class UserService:
             summaries.append(DoctorSummary.model_validate({**row, "uid": uid}))
         return summaries
 
-    def get_self(self, uid: str) -> UserResponse:
+    def get_self(self, uid: str, *, include_profile: bool = True) -> UserResponse:
         try:
             record = firebase_auth.get_user(uid)
         except firebase_exceptions.FirebaseError as exc:
             raise _translate(exc) from exc
-        return project_user(record)
+        if not include_profile:
+            return project_user(record)
+        return self._profile_response(record, self._profile_data(uid))
 
-    def update_self(self, uid: str, payload: UserUpdate) -> UserResponse:
+    def _profile_data(self, uid: str) -> dict[str, Any]:
+        try:
+            data = self._profiles.get(uid)
+        except (GoogleAPICallError, firebase_exceptions.FirebaseError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not load personal profile details",
+            ) from exc
+        return data or {}
+
+    def _profile_response(self, record: Any, data: dict[str, Any]) -> UserResponse:
+        # Never merge arbitrary stored fields into the authenticated account.
+        fields = UserPersonalDetails.model_validate(data).model_dump()
+        if "photo_path" in data:
+            fields["photo_url"] = self._media.photo_url(data["photo_path"]) if data["photo_path"] else None
+            if fields["photo_url"] and data.get("photo_version"):
+                separator = "&" if "?" in fields["photo_url"] else "?"
+                fields["photo_url"] += separator + "v=" + data["photo_version"]
+        return project_user(record).model_copy(update=fields)
+
+    def update_self(self, uid: str, payload: UserUpdate, *, photo: bytes | None = None) -> UserResponse:
         """Apply a profile-only update.
 
-        Any subset of the three profile fields may be supplied; omitted fields
-        are left untouched. A field sent as ``null`` or ``""`` is cleared, which
-        maps onto Firebase's DELETE_ATTRIBUTE sentinel (a bare empty string is
-        rejected by the Firebase SDK, so it is translated rather than passed
-        through).
+        Any subset of the profile fields may be supplied; omitted fields
+        are left untouched. A field sent as ``null`` or ``""`` is cleared.
+        Auth fields use Firebase's DELETE_ATTRIBUTE sentinel, while personal
+        fields are stored as nulls in Firestore.
 
         ``email``, ``password`` and ``role`` are not in the schema, so no
         credential or role field can reach Firebase from this path.
@@ -228,26 +258,68 @@ class UserService:
             else:
                 changes[field] = value
 
-        if not changes:
+        personal_changes = payload.model_dump(
+            mode="json", include=PERSONAL_FIELDS, exclude_unset=True
+        )
+        if photo is not None and payload.remove_photo:
+            raise HTTPException(422, "Upload a photo or remove the photo, not both")
+        if not changes and not personal_changes and photo is None and not payload.remove_photo:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
             )
 
+        personal = self._profile_data(uid)
+        # Verify the account before uploading media for a photo-only edit.
+        if photo is not None:
+            try:
+                firebase_auth.get_user(uid)
+            except firebase_exceptions.FirebaseError as exc:
+                raise _translate(exc) from exc
+        new_path = self._media.upload_profile_photo(uid, photo) if photo is not None else None
+        if payload.remove_photo:
+            changes["photo_url"] = firebase_auth.DELETE_ATTRIBUTE
+        if new_path is not None or payload.remove_photo:
+            personal_changes["photo_path"] = new_path
+            personal_changes["photo_version"] = uuid4().hex if new_path else None
         try:
-            record = firebase_auth.update_user(uid, **changes)
+            record = (
+                firebase_auth.update_user(uid, **changes)
+                if changes
+                else firebase_auth.get_user(uid)
+            )
         except (firebase_exceptions.FirebaseError, ValueError) as exc:
+            if new_path and new_path != personal.get("photo_path"):
+                self._media.delete_best_effort(new_path)
+            elif new_path:
+                raise HTTPException(503, "Photo was uploaded, but other profile changes could not be confirmed. Reload your profile before retrying.") from exc
             raise _translate(exc) from exc
 
-        self._sync_doctor_display_name(uid, record.display_name)
-        return project_user(record)
+        if changes:
+            self._sync_doctor_display_name(uid, record.display_name)
+        if personal_changes:
+            try:
+                self._profiles.save(uid, personal_changes)
+            except (GoogleAPICallError, firebase_exceptions.FirebaseError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "Profile changes could not be confirmed. Some changes "
+                        "may have been saved; reload your profile before retrying."
+                    ),
+                ) from exc
+            old_path = personal.get("photo_path")
+            personal.update(personal_changes)
+            if "photo_path" in personal_changes and old_path and old_path != new_path:
+                self._media.delete_best_effort(old_path)
+        return self._profile_response(record, personal)
 
     def _sync_doctor_display_name(self, uid: str, display_name: Optional[str]) -> None:
         """Mirror a display-name change onto the ``doctors`` document.
 
         The directory reads names from Firestore, so leaving it stale would make
         a doctor who renamed themselves still appear under the old name. Only
-        ``display_name`` is mirrored; the other two profile fields are not
-        stored on that document.
+        ``display_name`` is mirrored; other account and personal fields are
+        not stored on that document.
 
         Best-effort: a patient has no doctors document, and a Firestore failure
         here must not fail an otherwise successful account update.
@@ -261,7 +333,17 @@ class UserService:
             logger.warning("Could not sync display_name for doctor %s", uid)
 
     def delete_self(self, uid: str) -> None:
+        personal = self._profile_data(uid)
         try:
             firebase_auth.delete_user(uid)
         except firebase_exceptions.FirebaseError as exc:
             raise _translate(exc) from exc
+        try:
+            self._profiles.delete(uid)
+        except (GoogleAPICallError, firebase_exceptions.FirebaseError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Account deleted, but personal profile cleanup could not be confirmed",
+            ) from exc
+        if personal.get("photo_path"):
+            self._media.delete_best_effort(personal["photo_path"])

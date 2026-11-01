@@ -43,7 +43,9 @@ def delivery(monkeypatch):
 @pytest.mark.parametrize("kind", ["patient", "doctor"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_signup_sends_firebase_verification_template(delivery, monkeypatch, kind, failed):
-    monkeypatch.setattr(UserService, "__init__", lambda self, doctor_repo=None: None)
+    monkeypatch.setattr(
+        UserService, "__init__", lambda self, doctor_repo=None, profile_repo=None, media=None: None
+    )
     record = UserResponse(uid="new-uid", email="new@example.com")
     monkeypatch.setattr(UserService, f"create_{kind}", lambda self, payload: record)
     if failed:

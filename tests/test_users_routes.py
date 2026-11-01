@@ -1,11 +1,15 @@
 from unittest.mock import AsyncMock, patch
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from firebase_admin import auth as firebase_auth
+from google.api_core.exceptions import ServiceUnavailable
 
 from app.core.security import AuthenticatedUser, get_current_user
 from app.main import app
+from app.repositories.user_profile import UserProfileRepository
+from tests.user_profiles_fake import FakeUserProfiles
 
 
 def _record(**overrides):
@@ -82,12 +86,20 @@ def stub_repo(monkeypatch) -> _StubRepo:
     monkeypatch.setattr(
         UserService,
         "__init__",
-        lambda self, doctor_repo=None: setattr(self, "_doctors", repo),
+        lambda self, doctor_repo=None, profile_repo=None, media=None: setattr(self, "_doctors", repo),
     )
     return repo
 
 
 USERS = "/api/v1/users"
+
+
+@pytest.fixture(autouse=True)
+def personal_profiles():
+    repository = FakeUserProfiles()
+    app.dependency_overrides[UserProfileRepository] = lambda: repository
+    yield repository
+    app.dependency_overrides.pop(UserProfileRepository, None)
 
 
 @pytest.fixture(autouse=True)
@@ -309,9 +321,9 @@ def test_self_routes_require_auth(client: TestClient, method: str) -> None:
     [
         {"display_name": "Only Name"},
         {"phone_number": "+15550100"},
-        {"photo_url": "https://example.com/a.png"},
+        {"remove_photo": True},
         {"display_name": "A", "phone_number": "+15550100"},
-        {"display_name": "Real", "phone_number": "", "photo_url": ""},
+        {"display_name": "Real", "phone_number": "", "remove_photo": True},
         {"phone_number": None},
     ],
 )
@@ -332,6 +344,7 @@ def test_patch_me_accepts_partial_profiles(as_patient: TestClient, body) -> None
         ("password", "newsecret1"),
         ("disabled", True),
         ("uid", "someone-else"),
+        ("photo_url", "https://example.com/arbitrary.png"),
     ],
 )
 def test_patch_me_rejects_non_profile_fields(
@@ -362,12 +375,145 @@ def test_patch_me_never_echoes_password(as_patient: TestClient) -> None:
     assert "password" not in response.json()["data"]
 
 
-def test_delete_me_deletes_own_account(as_patient: TestClient) -> None:
+def test_patch_personal_details_round_trip_without_updating_auth(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    with patch.object(firebase_auth, "get_user", return_value=_record()) as get, patch.object(
+        firebase_auth, "update_user"
+    ) as update:
+        response = as_patient.patch(f"{USERS}/me", json={
+            "date_of_birth": "1994-02-28", "gender": " female ", "blood_group": "ab+",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["date_of_birth"] == "1994-02-28"
+        assert data["gender"] == "Female"
+        assert data["blood_group"] == "AB+"
+        assert personal_profiles.rows["caller-uid"] == {
+            "date_of_birth": "1994-02-28", "gender": "Female", "blood_group": "AB+",
+        }
+        assert as_patient.get(f"{USERS}/me").json()["data"] == data
+    update.assert_not_called()
+    assert all(call.args == ("caller-uid",) for call in get.call_args_list)
+
+
+def test_patch_mixed_profile_splits_auth_and_personal_fields(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    personal_profiles.rows["caller-uid"] = {"blood_group": "O-"}
+    with patch.object(firebase_auth, "update_user", return_value=_record(displayName="Renamed")) as update:
+        response = as_patient.patch(f"{USERS}/me", json={
+            "display_name": "Renamed", "date_of_birth": "2000-02-29", "gender": "Male",
+        })
+    assert response.status_code == 200, response.text
+    update.assert_called_once_with("caller-uid", display_name="Renamed")
+    assert personal_profiles.writes == [
+        ("caller-uid", {"date_of_birth": "2000-02-29", "gender": "Male"})
+    ]
+    data = response.json()["data"]
+    assert data["display_name"] == "Renamed"
+    assert data["blood_group"] == "O-"
+
+
+@pytest.mark.parametrize("clear", [None, "", "   "])
+def test_patch_clears_personal_fields_and_preserves_omitted_fields(
+    as_patient: TestClient, personal_profiles, clear,
+) -> None:
+    personal_profiles.rows["caller-uid"] = {
+        "date_of_birth": "1990-01-01", "gender": "Other", "blood_group": "A+",
+    }
+    personal_profiles.rows["other-uid"] = {"gender": "Male"}
+    with patch.object(firebase_auth, "get_user", return_value=_record()):
+        response = as_patient.patch(f"{USERS}/me", json={"date_of_birth": clear, "gender": clear})
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["date_of_birth"] is None
+        assert data["gender"] is None
+        assert data["blood_group"] == "A+"
+        assert as_patient.get(f"{USERS}/me").json()["data"]["gender"] is None
+    assert personal_profiles.rows["other-uid"] == {"gender": "Male"}
+
+
+@pytest.mark.parametrize("body", [
+    {"date_of_birth": "2001-02-29"},
+    {"date_of_birth": "2000-13-01"},
+    {"date_of_birth": "2000-01-01T00:00:00Z"},
+    {"date_of_birth": 0},
+    {"date_of_birth": (date.today() + timedelta(days=1)).isoformat()},
+    {"gender": "invalid"}, {"gender": 1},
+    {"blood_group": "C+"}, {"blood_group": "AB"},
+])
+def test_patch_rejects_invalid_personal_details_without_writes(
+    as_patient: TestClient, personal_profiles, body,
+) -> None:
+    with patch.object(firebase_auth, "get_user") as get, patch.object(firebase_auth, "update_user") as update:
+        response = as_patient.patch(f"{USERS}/me", json=body)
+    assert response.status_code == 422, response.text
+    assert personal_profiles.writes == []
+    get.assert_not_called()
+    update.assert_not_called()
+
+
+def test_get_profile_merges_only_allowed_personal_fields(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    personal_profiles.rows["caller-uid"] = {
+        "date_of_birth": "1990-01-01", "gender": "Male", "blood_group": "O+",
+        "uid": "other-uid", "role": "admin", "email": "other@example.com",
+        "password_hash": "PRIVATE", "updated_at": "internal metadata",
+    }
+    with patch.object(firebase_auth, "get_user", return_value=_record()):
+        data = as_patient.get(f"{USERS}/me").json()["data"]
+    assert data["date_of_birth"] == "1990-01-01"
+    assert data["uid"] == "caller-uid"
+    assert data["role"] == "patient"
+    assert data["email"] == "caller@example.com"
+    assert "PRIVATE" not in str(data)
+    assert "updated_at" not in data
+
+
+def test_personal_profile_write_failure_reports_partial_update(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    with patch.object(firebase_auth, "update_user", return_value=_record()) as update, patch.object(
+        personal_profiles, "save", side_effect=ServiceUnavailable("offline")
+    ):
+        response = as_patient.patch(f"{USERS}/me", json={"display_name": "Renamed", "gender": "Other"})
+    update.assert_called_once_with("caller-uid", display_name="Renamed")
+    assert response.status_code == 503
+    assert "Some changes may have been saved" in response.text
+
+
+def test_personal_profile_read_failure_prevents_auth_update(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    with patch.object(firebase_auth, "update_user") as update, patch.object(
+        personal_profiles, "get", side_effect=ServiceUnavailable("offline")
+    ):
+        response = as_patient.patch(f"{USERS}/me", json={"display_name": "Renamed", "gender": "Other"})
+    assert response.status_code == 503
+    update.assert_not_called()
+    assert personal_profiles.writes == []
+
+
+def test_personal_details_do_not_create_profile_for_missing_account(
+    as_patient: TestClient, personal_profiles,
+) -> None:
+    with patch.object(firebase_auth, "get_user", side_effect=firebase_auth.UserNotFoundError("missing", None)):
+        response = as_patient.patch(f"{USERS}/me", json={"gender": "Female"})
+    assert response.status_code == 404
+    assert personal_profiles.writes == []
+
+
+def test_delete_me_deletes_own_account(as_patient: TestClient, personal_profiles) -> None:
+    personal_profiles.rows["caller-uid"] = {"blood_group": "A+"}
     with patch.object(firebase_auth, "delete_user") as delete:
         response = as_patient.delete(f"{USERS}/me")
 
     assert response.status_code == 204
     assert delete.call_args.args[0] == "caller-uid"
+    assert personal_profiles.deleted == ["caller-uid"]
+    assert personal_profiles.rows == {}
 
 
 def test_delete_me_returns_404_when_already_gone(as_patient: TestClient) -> None:

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.schemas.doctors import Clinic, DoctorCreate, DoctorProfile, TimeRange
 from app.schemas.users import PatientCreate, UserUpdate
 from app.services.users import UserService
+from tests.user_profiles_fake import FakeUserProfiles
 
 
 def _record(**overrides):
@@ -112,7 +113,7 @@ def repo() -> FakeDoctorRepo:
 
 @pytest.fixture
 def service(repo: FakeDoctorRepo) -> UserService:
-    return UserService(doctor_repo=repo)
+    return UserService(doctor_repo=repo, profile_repo=FakeUserProfiles())
 
 
 def _profile_kwargs() -> dict:
@@ -544,23 +545,26 @@ def test_update_rejects_role_field() -> None:
         UserUpdate(role="admin")  # type: ignore[call-arg]
 
 
-@pytest.mark.parametrize("field", ["email", "password", "role", "uid", "disabled"])
+@pytest.mark.parametrize("field", ["email", "password", "role", "uid", "disabled", "photo_url"])
 def test_update_schema_forbids_non_profile_fields(field: str) -> None:
     with pytest.raises(ValidationError):
         UserUpdate(**{field: "x"})  # type: ignore[arg-type]
 
 
-def test_update_accepts_only_the_three_profile_fields() -> None:
+def test_update_accepts_account_and_personal_profile_fields() -> None:
     payload = UserUpdate(
-        display_name="A", phone_number="+15550100", photo_url="https://x.dev/a.png"
+        display_name="A", phone_number="+15550100", remove_photo=True
     )
 
-    assert set(payload.model_dump()) == {"display_name", "phone_number", "photo_url"}
+    assert set(payload.model_dump()) == {
+        "display_name", "phone_number", "remove_photo",
+        "date_of_birth", "gender", "blood_group",
+    }
 
 
 def test_update_applies_all_three_fields(service: UserService) -> None:
     payload = UserUpdate(
-        display_name="A", phone_number="+15550100", photo_url="https://x.dev/a.png"
+        display_name="A", phone_number="+15550100", remove_photo=True
     )
 
     with patch.object(firebase_auth, "update_user", return_value=_record()) as update:
@@ -569,7 +573,7 @@ def test_update_applies_all_three_fields(service: UserService) -> None:
     assert update.call_args.kwargs == {
         "display_name": "A",
         "phone_number": "+15550100",
-        "photo_url": "https://x.dev/a.png",
+        "photo_url": firebase_auth.DELETE_ATTRIBUTE,
     }
     assert update.call_args.args[0] == "uid-1"
 
@@ -579,7 +583,6 @@ def test_update_applies_all_three_fields(service: UserService) -> None:
     [
         ("display_name", "Only Name"),
         ("phone_number", "+15550100"),
-        ("photo_url", "https://x.dev/a.png"),
     ],
 )
 def test_update_accepts_any_single_field(
@@ -594,7 +597,7 @@ def test_update_accepts_any_single_field(
 
 
 @pytest.mark.parametrize(
-    "field", ["display_name", "phone_number", "photo_url"]
+    "field", ["display_name", "phone_number"]
 )
 def test_empty_string_clears_field_instead_of_400(
     service: UserService, field: str
@@ -608,7 +611,7 @@ def test_empty_string_clears_field_instead_of_400(
 
 
 @pytest.mark.parametrize(
-    "field", ["display_name", "phone_number", "photo_url"]
+    "field", ["display_name", "phone_number"]
 )
 def test_explicit_null_clears_field(service: UserService, field: str) -> None:
     payload = UserUpdate.model_validate({field: None})
@@ -638,7 +641,7 @@ def test_single_field_update_with_other_empty_strings_succeeds(
     service: UserService,
 ) -> None:
     payload = UserUpdate.model_validate(
-        {"display_name": "Real Name", "phone_number": "", "photo_url": ""}
+        {"display_name": "Real Name", "phone_number": "", "remove_photo": True}
     )
 
     with patch.object(firebase_auth, "update_user", return_value=_record()) as update:
@@ -652,7 +655,7 @@ def test_single_field_update_with_other_empty_strings_succeeds(
 
 
 def test_update_never_sends_credentials_or_claims(service: UserService) -> None:
-    payload = UserUpdate(display_name="A", phone_number="+1", photo_url="https://x")
+    payload = UserUpdate(display_name="A", phone_number="+1")
 
     with patch.object(firebase_auth, "update_user", return_value=_record()) as update:
         service.update_self("uid-1", payload)

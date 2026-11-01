@@ -16,12 +16,13 @@ from app.repositories.appointment import AppointmentRepository
 from app.schemas.appointments import AppointmentStatus
 from app.services.booking import BookingService
 from app.services.video import VideoService
+from app.schemas.users import UserResponse
 
 
 @pytest.fixture
 def video_api():
     repository = Mock()
-    repository.get_for_user.return_value = {"video_room_id": "old-room-name"}
+    repository.get_for_user.return_value = {"video_room_id": "old-room-name", "status": "confirmed"}
     settings = Settings(
         _env_file=None,
         agora_app_id="a" * 32,
@@ -69,6 +70,17 @@ def test_video_token_rejects_missing_or_inaccessible_appointment(video_api):
     assert response.status_code == 404
 
 
+@pytest.mark.parametrize("changes", [
+    {"status": "completed"}, {"status": "cancelled"},
+    {"appointment_type": "chat"}, {"appointment_type": "in_person"},
+])
+def test_video_token_rejects_inactive_or_non_video_appointments(video_api, changes):
+    client, repository, _, _ = video_api
+    repository.get_for_user.return_value.update(changes)
+    response = client.post("/api/v1/video/token", json={"appointment_id": "appointment-1"})
+    assert response.status_code == 409
+
+
 @pytest.mark.parametrize("credential", ["agora_app_id", "agora_app_certificate"])
 def test_video_token_requires_agora_credentials(video_api, credential):
     client, _, settings, _ = video_api
@@ -110,7 +122,9 @@ def test_created_appointment_video_access_uses_participant_uids(video_api, role,
 
     repository.create = Mock(side_effect=create)
     repository.get = Mock(side_effect=rows.get)
-    app.dependency_overrides[BookingService] = lambda: BookingService(repository)
+    users = Mock()
+    users.get_self.return_value = UserResponse(uid="patient-1", display_name="Test Patient")
+    app.dependency_overrides[BookingService] = lambda: BookingService(repository, users)
     app.dependency_overrides[VideoService] = lambda: VideoService(repository, settings)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         uid=uid, claims={"role": role}

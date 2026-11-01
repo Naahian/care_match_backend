@@ -83,6 +83,9 @@ def test_projection_excludes_credential_material() -> None:
         "providers",
         "created_at",
         "last_login_at",
+        "date_of_birth",
+        "gender",
+        "blood_group",
     }
 
 

@@ -47,10 +47,12 @@ async def update_appointment_status(
 ) -> SuccessResponse[AppointmentResponse]:
     try:
         record = service.transition(
-            appointment_id, new_status, actor_uid=user.uid, actor_role="doctor"
+            appointment_id, new_status, actor_uid=user.uid, actor_role=user.role
         )
     except PermissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return SuccessResponse(data=AppointmentResponse.model_validate(record, from_attributes=True))

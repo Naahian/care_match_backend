@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, status
 from app.core.config import Settings, get_settings
 from app.repositories.appointment import AppointmentRepository
 from app.schemas.video import VideoTokenResponse
+from app.core.appointment_rules import ACTIVE_STATUSES
 
 TOKEN_TTL_MINUTES = 60
 
@@ -28,6 +29,13 @@ class VideoService:
         appointment = self._repo.get_for_user(appointment_id, user_id, role)
         if not appointment:
             raise PermissionError("Appointment not found for this user")
+
+        if (appointment.get("status") not in ACTIVE_STATUSES
+            or appointment.get("appointment_type", "video") != "video"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only active video appointments can join a video consultation",
+            )
 
         if not self._settings.agora_app_id or not self._settings.agora_app_certificate:
             raise HTTPException(

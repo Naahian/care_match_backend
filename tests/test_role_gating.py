@@ -58,7 +58,8 @@ def stub_repo(monkeypatch) -> _StubRepo:
     from app.services.users import UserService
 
     monkeypatch.setattr(
-        UserService, "__init__", lambda self, doctor_repo=None: setattr(self, "_doctors", repo)
+        UserService, "__init__",
+        lambda self, doctor_repo=None, profile_repo=None, media=None: setattr(self, "_doctors", repo)
     )
     return repo
 
