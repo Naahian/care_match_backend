@@ -199,13 +199,32 @@ class UserService:
                 detail="Could not reach Firestore",
             ) from exc
 
+        uids = list(dict.fromkeys(row.get("uid") or row.get("id") for row in rows))
+        uids = [uid for uid in uids if uid]
+        photos = self._directory_photos(uids)
         summaries: list[DoctorSummary] = []
         for row in rows:
             uid = row.get("uid") or row.get("id")
             if not uid:
                 continue
-            summaries.append(DoctorSummary.model_validate({**row, "uid": uid}))
+            summaries.append(DoctorSummary.model_validate({**row, "uid": uid, "photo_url": photos[uid]}))
         return summaries
+
+    def _directory_photos(self, uids: list[str]) -> dict[str, Optional[str]]:
+        try:
+            profiles = self._profiles.get_many(uids)
+            # Only legacy profiles need Auth lookup. A saved null photo_path
+            # represents explicit removal and must not restore an old photo.
+            legacy = [uid for uid in uids if "photo_path" not in profiles.get(uid, {})]
+            fallback = {}
+            for start in range(0, len(legacy), 100):
+                records = firebase_auth.get_users([
+                    firebase_auth.UidIdentifier(uid) for uid in legacy[start:start + 100]
+                ])
+                fallback.update({record.uid: record.photo_url for record in records.users})
+        except (GoogleAPICallError, firebase_exceptions.FirebaseError) as exc:
+            raise HTTPException(503, "Could not load doctor photos") from exc
+        return {uid: self._profile_photo_url(profiles.get(uid, {}), fallback.get(uid)) for uid in uids}
 
     def get_self(self, uid: str, *, include_profile: bool = True) -> UserResponse:
         try:
@@ -255,12 +274,16 @@ class UserService:
     def _profile_response(self, record: Any, data: dict[str, Any]) -> UserResponse:
         # Never merge arbitrary stored fields into the authenticated account.
         fields = UserPersonalDetails.model_validate(data).model_dump()
-        if "photo_path" in data:
-            fields["photo_url"] = self._media.photo_url(data["photo_path"]) if data["photo_path"] else None
-            if fields["photo_url"] and data.get("photo_version"):
-                separator = "&" if "?" in fields["photo_url"] else "?"
-                fields["photo_url"] += separator + "v=" + data["photo_version"]
+        fields["photo_url"] = self._profile_photo_url(data, record.photo_url)
         return project_user(record).model_copy(update=fields)
+
+    def _profile_photo_url(self, data: dict[str, Any], fallback: Optional[str]) -> Optional[str]:
+        if "photo_path" not in data:
+            return fallback
+        url = self._media.photo_url(data["photo_path"]) if data["photo_path"] else None
+        if url and data.get("photo_version"):
+            url += ("&" if "?" in url else "?") + "v=" + data["photo_version"]
+        return url
 
     def update_self(self, uid: str, payload: UserUpdate, *, photo: bytes | None = None) -> UserResponse:
         """Apply a profile-only update.

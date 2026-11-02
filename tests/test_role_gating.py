@@ -6,7 +6,8 @@ the annotation and ignores the default. These tests assert the 403 behaviour,
 not the wiring, so that mistake cannot pass unnoticed again.
 """
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,10 +58,13 @@ def stub_repo(monkeypatch) -> _StubRepo:
     repo = _StubRepo()
     from app.services.users import UserService
 
-    monkeypatch.setattr(
-        UserService, "__init__",
-        lambda self, doctor_repo=None, profile_repo=None, media=None: setattr(self, "_doctors", repo)
-    )
+    from tests.user_profiles_fake import FakeUserProfiles
+    def initialize(self, doctor_repo=None, profile_repo=None, media=None):
+        self._doctors = repo
+        self._profiles = FakeUserProfiles()
+        self._media = Mock()
+    monkeypatch.setattr(UserService, "__init__", initialize)
+    monkeypatch.setattr(firebase_auth, "get_users", lambda identifiers: SimpleNamespace(users=[]))
     return repo
 
 

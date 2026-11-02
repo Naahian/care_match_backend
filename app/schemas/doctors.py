@@ -69,6 +69,7 @@ class DoctorSummary(BaseModel):
 
     uid: str
     display_name: Optional[str] = None
+    photo_url: Optional[str] = None
     specialties: list[str] = Field(default_factory=list)
     degrees: list[str] = Field(default_factory=list)
     clinics: list[Clinic] = Field(default_factory=list)

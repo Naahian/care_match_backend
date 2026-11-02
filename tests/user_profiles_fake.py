@@ -7,6 +7,9 @@ class FakeUserProfiles:
     def get(self, uid):
         return dict(self.rows[uid]) if uid in self.rows else None
 
+    def get_many(self, uids):
+        return {uid: dict(self.rows[uid]) for uid in uids if uid in self.rows}
+
     def save(self, uid, changes):
         self.writes.append((uid, dict(changes)))
         self.rows[uid] = {**self.rows.get(uid, {}), **changes}

@@ -112,7 +112,9 @@ def repo() -> FakeDoctorRepo:
 
 
 @pytest.fixture
-def service(repo: FakeDoctorRepo) -> UserService:
+def service(repo: FakeDoctorRepo, monkeypatch) -> UserService:
+    from types import SimpleNamespace
+    monkeypatch.setattr(firebase_auth, "get_users", lambda identifiers: SimpleNamespace(users=[]))
     return UserService(doctor_repo=repo, profile_repo=FakeUserProfiles())
 
 

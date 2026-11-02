@@ -75,6 +75,14 @@ Both GET and PATCH `/api/v1/users/me` return the three personal fields with the
 existing account fields in the standard `data` envelope. Users without stored
 personal details receive nulls.
 
+`GET /api/v1/users/doctors` also returns `photo_url` for each doctor, using the
+same uploaded profile photo and version parameter as the self profile. Public
+profile-image buckets return public URLs; private buckets return fresh signed
+URLs. Legacy Firebase Auth photos are used until replaced or removed. Missing
+photos return null, and removing a photo does not restore a legacy image.
+Directory photo lookups batch profile and legacy Auth reads. Personal fields,
+contact details, earnings, and storage paths are not added to the directory.
+
 Account fields remain in Firebase Auth. Personal details are stored privately
 in Firestore `user_profiles/{uid}` with merge writes, so the first edit creates
 the document and later edits preserve omitted fields. The backend derives the
